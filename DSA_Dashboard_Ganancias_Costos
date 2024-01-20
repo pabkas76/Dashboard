@@ -1,0 +1,123 @@
+import dash
+from dash import html, dcc
+from dash.dependencies import Input, Output
+import pandas as pd
+
+
+# Creamos los dataframe para las ganancias y los costos y adicionamos una excepcion de error por si no existe el archivo 
+try:
+    gananciasdatos = pd.read_csv('revenue_2022.csv')
+except FileNotFoundError:
+    print("Error: The file revenue_2022.csv was not found.")
+    gananciasdatos = None
+except pd.errors.EmptyDataError:
+    print("Error: The file revenue_2022.csv is empty.")
+    gananciasdatos = None
+
+try:
+    costosdatos = pd.read_csv("costs_2022.csv")
+except FileNotFoundError:
+    print("Error: The file costs_2022.csv was not found.")
+    costosdatos = None
+except pd.errors.EmptyDataError:
+    print("Error: The file costs_2022.csv is empty.")
+    costosdatos = None
+
+    # Definimos una lista de los meses para iniciar el proceso de transformacion de datos
+months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Total']
+
+# por medio del for vamos a generar una iteracion para conversion de tipos de datos 
+for month in months:
+    # Convertimos los datos
+    costosdatos[month] = costosdatos[month].astype(str).replace('[^\d.]', '', regex=True).str.replace('.', '', regex=False)
+
+    # Fijamos una cantidad maxima de digitos
+    costosdatos[month] = costosdatos[month].str[:7]
+
+    
+    # Replazamos valores nulos por ceros y los convertimos al tipo de dato int64
+    costosdatos[month] = costosdatos[month].replace('', '0').astype('int64')
+
+    # Se validan los valores que fueron convertidos
+    if costosdatos[month].isna().any():
+        print(f"Warning: NaN valores detectados en la columna {month} despues del proceso de conversion.")
+    else:
+        print(f"la conversion de datos para la columna {month} fue exitosa.")
+
+# Check for NaN values in the 'Total' column after conversion
+if costosdatos['Total'].isna().any():
+    print("Warning: NaN valores detectados en la columna 'Total' despues del proceso de conversion.")
+else:
+    print("la conversion de datos para la columna 'Total' fue exitosa.")
+
+
+
+# Creamos el filtro para el menu desplegable
+lineanegocio_options = [
+    {'label': lineanegocio, 'value': lineanegocio}
+    for lineanegocio in pd.concat([gananciasdatos, costosdatos])['Line Of Business'].unique()
+    if pd.notna(lineanegocio)
+]
+
+
+# Creamos la aplicacion que va generar el dashboard con los resultados esperados
+app = dash.Dash(__name__)
+
+#  Diseña el titulo principal del dashboard
+app.layout = html.Div(children=[
+    html.H1(children='Grafica Ingresos y Costos por Linea de Negocio', style={'font-weight': 'bold', 'font-style': 'italic'}),
+    
+    #Diseñamos el dropdown para filtrar las lineas de negocios para costos y ganancias
+      dcc.Dropdown(
+        id='dropdown',
+        options=lineanegocio_options,
+        multi=True,
+        value=gananciasdatos['Line Of Business'].unique()
+    ),
+    
+    
+    #  creamos el identificador de la grafica 
+    dcc.Graph(
+        id='ganaciascostos_grafico'
+    )
+])
+
+#adicionamos la funcion callback la cual va actualizar la grafica segun corresponda
+@app.callback(
+    dash.dependencies.Output('ganaciascostos_grafico', 'figure'),[dash.dependencies.Input('dropdown', 'value')]
+)
+def visualizacion_chart(seleccionarlineanegocio):
+    # creamos los filtros para las líneas de negocio
+    gananciasdatosfiltro = gananciasdatos[gananciasdatos['Line Of Business'].isin(seleccionarlineanegocio)]
+    costosdatosfiltro = costosdatos[costosdatos['Line Of Business'].isin(seleccionarlineanegocio)]
+
+    # procedemos a diseñar la grafica con sus respectivos axis
+    figure = {
+        'data': [
+            {'x': costosdatosfiltro.columns[3:-1], 'y': costosdatosfiltro[month], 'type': 'line', 'name': f'Costos - {line}'}
+            for line in seleccionarlineanegocio
+            for month in costosdatosfiltro.columns[3:-1]
+        ] + 
+        [
+            {'x': gananciasdatosfiltro.columns[3:-1], 'y': gananciasdatosfiltro[month], 'type': 'line', 'name': f'Ganancias - {line}'}
+            for line in seleccionarlineanegocio
+            for month in gananciasdatosfiltro.columns[3:-1]
+        ],
+        'layout': {
+            'title': 'Chart Ganancias VS Costos por Linea de Negocio',
+            'xaxis':  {
+              'title': 'Mes del Año',
+              'font': {'color': 'blue'},
+              'tickmode': 'array'
+            },
+            'yaxis': {
+               'title': 'Valores en Pesos'},
+               'tickmode': 'category'
+        }
+    }
+
+    return figure
+
+# procedemos a ejecutar la aplicacion
+if __name__ == '__main__':
+    app.run_server(debug=True)
